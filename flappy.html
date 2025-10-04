@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Flappy Clone (HTML5)</title>
+<style>
+  :root{
+    --bg:#70c5ce;
+    --ground:#ded895;
+    --pipe:#38a64b;
+    --bird:#ffdd57;
+    --text:#ffffff;
+  }
+  html,body{height:100%;margin:0;font-family:Segoe UI,Roboto,Arial}
+  .wrap{display:flex;align-items:center;justify-content:center;height:100%;background:linear-gradient(#9ad8e3, var(--bg));}
+  canvas{background:linear-gradient(#70c5ce 0%, #9ad8e3 60%);border:4px solid #3aa0b0;box-shadow:0 8px 24px rgba(0,0,0,0.2);border-radius:6px;}
+  .ui {
+    position:fixed; left:12px; top:12px; color:var(--text);
+    text-shadow:0 1px 0 rgba(0,0,0,0.3); user-select:none;
+  }
+  .overlay{
+    position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    background:rgba(0,0,0,0.45);color:white;padding:18px 22px;border-radius:10px;text-align:center;
+    backdrop-filter: blur(2px);
+  }
+  button.btn{
+    background:#ff9f1c;color:white;border:none;padding:8px 12px;border-radius:6px;font-weight:700;cursor:pointer;margin-top:10px;
+  }
+  small {opacity:0.9;display:block;margin-top:6px}
+  footer{position:fixed;right:12px;bottom:12px;color:#085; font-size:12px;opacity:0.6}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <canvas id="c" width="400" height="550"></canvas>
+  <div class="ui" id="ui">
+    Score: <span id="score">0</span><br/>
+    Best: <span id="best">0</span>
+  </div>
+</div>
+<footer>Controls: Space / Click / Tap / Up</footer>
+
+<script>
+/*
+  Simple Flappy Bird clone (single-file)
+  - Canvas-based
+  - Uses rectangles and a circle for the bird (no external assets)
+  - LocalStorage best score
+*/
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+const W = canvas.width, H = canvas.height;
+const GROUND_H = 90;
+const PIPE_W = 56;
+const PIPE_GAP = 140; // vertical gap between top and bottom pipe
+const PIPE_SPACING = 180; // horizontal distance between pipe pairs
+const GRAVITY = 1000; // px/s^2
+const FLAP_V = -320; // px/s (instant velocity on flap)
+
+let state = 'menu'; // 'menu', 'playing', 'dead'
+let bird = {};
+let pipes = [];
+let lastPipeX = 0;
+let elapsed = 0;
+let score = 0;
+let best = parseInt(localStorage.getItem('flappy_clone_best') || '0', 10);
+
+document.getElementById('best').innerText = best;
+document.getElementById('score').innerText = score;
+
+function resetGame() {
+  bird = {
+    x: 90,
+    y: H/2,
+    r: 14,
+    vy: 0,
+    rotation: 0
+  };
+  pipes = [];
+  lastPipeX = W + 100;
+  score = 0;
+  elapsed = 0;
+  state = 'menu';
+  document.getElementById('score').innerText = score;
+}
+
+resetGame();
+
+// utility
+function randRange(a,b){ return a + Math.random()*(b-a); }
+
+function spawnPipePair(x) {
+  // gap center between 120 and H - GROUND_H - 120
+  const minCenter = 110;
+  const maxCenter = H - GROUND_H - 110;
+  const mid = randRange(minCenter, maxCenter);
+  const top = {x, y: mid - PIPE_GAP/2 - 999, h: 999, passed:false}; // we draw top pipe downward
+  const bottom = {x, y: mid + PIPE_GAP/2, h: H - GROUND_H - (mid + PIPE_GAP/2), passed:false};
+  pipes.push({top, bottom});
+}
+
+function flap() {
+  if (state === 'menu') {
+    state = 'playing';
+    bird.vy = FLAP_V;
+  } else if (state === 'playing') {
+    bird.vy = FLAP_V;
+  } else if (state === 'dead') {
+    resetGame();
+  }
+}
+
+// input
+window.addEventListener('keydown', e => {
+  if (e.code === 'Space' || e.code === 'ArrowUp') {
+    e.preventDefault();
+    flap();
+  }
+});
+canvas.addEventListener('mousedown', e => { flap(); });
+canvas.addEventListener('touchstart', e => { e.preventDefault(); flap(); }, {passive:false});
+
+// collision helpers
+function rectsOverlap(ax,ay,aw,ah,bx,by,bw,bh) {
+  return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+}
+
+function checkCollision() {
+  // ground
+  if (bird.y + bird.r > H - GROUND_H) return true;
+  if (bird.y - bird.r < 0) return true;
+
+  // pipes (approx bird as a circle; check against pipe rects)
+  for (const pair of pipes) {
+    // top pipe rect
+    const tx = pair.top.x;
+    const ty = 0;
+    const tw = PIPE_W;
+    const th = pair.top.y + pair.top.h; // effectively mid - gap/2
+    if (circleRectCollision(bird.x, bird.y, bird.r, tx, ty, tw, th)) return true;
+    // bottom pipe
+    const bx = pair.bottom.x;
+    const by = pair.bottom.y;
+    const bw = PIPE_W;
+    const bh = H - GROUND_H - pair.bottom.y;
+    if (circleRectCollision(bird.x, bird.y, bird.r, bx, by, bw, bh)) return true;
+  }
+  return false;
+}
+
+function circleRectCollision(cx,cy,r, rx,ry,rw,rh) {
+  // nearest point on rect to circle center
+  const nx = Math.max(rx, Math.min(cx, rx + rw));
+  const ny = Math.max(ry, Math.min(cy, ry + rh));
+  const dx = nx - cx;
+  const dy = ny - cy;
+  return dx*dx + dy*dy < r*r;
+}
+
+// main loop
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.03, (now - last) / 1000); // clamp dt
+  last = now;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// update
+function update(dt) {
+  if (state === 'menu') {
+    // gentle bob
+    elapsed += dt;
+    bird.y = H/2 + Math.sin(elapsed*2)*8;
+    bird.rotation = Math.sin(elapsed*2) * 0.2;
+    return;
+  }
+
+  if (state === 'playing') {
+    // spawn pipes when needed
+    if (pipes.length === 0 || (W - pipes[pipes.length-1].top.x) > PIPE_SPACING) {
+      spawnPipePair(W + 20);
+    }
+
+    // move pipes
+    for (const pair of pipes) {
+      pair.top.x -= 120 * dt;
+      pair.bottom.x -= 120 * dt;
+      // scoring: when pipe passes bird.x, count
+      if (!pair.top.passed && pair.top.x + PIPE_W < bird.x) {
+        pair.top.passed = pair.bottom.passed = true;
+        score += 1;
+        document.getElementById('score').innerText = score;
+        if (score > best) {
+          best = score;
+          localStorage.setItem('flappy_clone_best', best);
+          document.getElementById('best').innerText = best;
+        }
+      }
+    }
+
+    // remove off-screen pipes
+    pipes = pipes.filter(p => p.top.x + PIPE_W > -50);
+
+    // bird physics
+    bird.vy += GRAVITY * dt;
+    bird.y += bird.vy * dt;
+
+    // rotation proportional to vy
+    bird.rotation = Math.max(-0.6, Math.min(1.2, bird.vy / 400));
+
+    // collisions
+    if (checkCollision()) {
+      state = 'dead';
+      // on death, give a small bounce effect
+      bird.vy = 0;
+    }
+  } else if (state === 'dead') {
+    // fall to ground
+    bird.vy += GRAVITY * dt;
+    bird.y += bird.vy * dt;
+    bird.rotation = Math.min(1.6, bird.rotation + dt*2);
+    // stop when hits ground
+    if (bird.y + bird.r >= H - GROUND_H) {
+      bird.y = H - GROUND_H - bird.r;
+    }
+  }
+}
+
+// draw
+function draw() {
+  ctx.clearRect(0,0,W,H);
+
+  // sky gradient (already background of canvas but redraw subtle)
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#9fe7f0');
+  g.addColorStop(1,'#70c5ce');
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,W,H);
+
+  // draw pipes (green)
+  for (const pair of pipes) {
+    // top pipe (draw rectangle from top down to gap top)
+    ctx.fillStyle = '#2f8f40';
+    const tx = pair.top.x;
+    const topHeight = (pair.top.y + pair.top.h); // large value placed to reach gap
+    // draw top rectangle
+    ctx.fillRect(tx, 0, PIPE_W, topHeight);
+    // draw bottom pipe
+    const bx = pair.bottom.x;
+    const by = pair.bottom.y;
+    const bh = H - GROUND_H - by;
+    ctx.fillRect(bx, by, PIPE_W, bh);
+
+    // optional pipe cap (lighter)
+    ctx.fillStyle = '#3fbf54';
+    ctx.fillRect(tx-2, topHeight-12, PIPE_W+4, 12);
+    ctx.fillRect(bx-2, by, PIPE_W+4, 12);
+  }
+
+  // ground
+  ctx.fillStyle = '#ded895';
+  ctx.fillRect(0, H - GROUND_H, W, GROUND_H);
+  // ground pattern
+  ctx.fillStyle = 'rgba(0,0,0,0.06)';
+  for (let i=0;i<20;i++){
+    ctx.fillRect(i*40 + ((Date.now()/60)|0)%40, H - 30, 20, 6);
+  }
+
+  // bird (circle + eye + wing)
+  ctx.save();
+  ctx.translate(bird.x, bird.y);
+  ctx.rotate(bird.rotation);
+  // body
+  ctx.fillStyle = '#ffcf45';
+  ctx.beginPath();
+  ctx.ellipse(0,0,bird.r*1.3,bird.r,0,0,Math.PI*2);
+  ctx.fill();
+  // belly
+  ctx.fillStyle = '#ffecb2';
+  ctx.beginPath();
+  ctx.ellipse(-3,2,bird.r*0.9,bird.r*0.6,0,0,Math.PI*2);
+  ctx.fill();
+  // eye
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.arc(7,-3,3,0,Math.PI*2);
+  ctx.fill();
+  // beak
+  ctx.fillStyle = '#ff8b2b';
+  ctx.beginPath();
+  ctx.moveTo(bird.r-2,0);
+  ctx.lineTo(bird.r+12,-4);
+  ctx.lineTo(bird.r+12,4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  // UI overlay for menu / death
+  if (state === 'menu') {
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(W/2 - 140, H/2 - 70, 280, 140);
+    ctx.fillStyle = '#fff';
+    ctx.font = '20px system-ui,Segoe UI,Roboto';
+    ctx.textAlign = 'center';
+    ctx.fillText('Flappy Clone', W/2, H/2 - 30);
+    ctx.font = '14px system-ui,Segoe UI,Roboto';
+    ctx.fillText('Press Space / Click / Tap to start', W/2, H/2 - 4);
+    ctx.fillText('Score points by flying between pipes', W/2, H/2 + 18);
+  } else if (state === 'dead') {
+    ctx.fillStyle = 'rgba(0,0,0,0.56)';
+    ctx.fillRect(W/2 - 150, H/2 - 80, 300, 160);
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.font = '28px system-ui,Segoe UI,Roboto';
+    ctx.fillText('Game Over', W/2, H/2 - 20);
+    ctx.font = '18px system-ui,Segoe UI,Roboto';
+    ctx.fillText(`Score: ${score}`, W/2, H/2 + 6);
+    ctx.fillText(`Best: ${best}`, W/2, H/2 + 36);
+    ctx.font = '13px system-ui,Segoe UI,Roboto';
+    ctx.fillText('Click / Tap / Space to restart', W/2, H/2 + 66);
+  }
+}
+</script>
+</body>
+</html>
